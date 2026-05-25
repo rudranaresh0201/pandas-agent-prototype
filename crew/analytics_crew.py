@@ -78,27 +78,61 @@ class AnalyticsCrew:
 
     def _run_with_crew(self, question, file_path, file_type, persona) -> str:
         from crewai import Crew, Process, Task
+        from crew.tools import ingest_file_tool, analyze_schema_tool
+        import json
+
+        # Pre-populate module _state deterministically before the crew starts.
+        # CrewAI inter-task context is text-only — DataFrames cannot survive an
+        # LLM prompt boundary, so we must not rely on the orchestrator LLM to
+        # actually invoke ingest_file. We call the tool functions directly here,
+        # which sets crew.tools._state["datastore"] and crew.tools._state["schema"].
+        # The orchestrator's task1 then receives the schema summary as text context
+        # for task2, which is all CrewAI context can legitimately provide.
+        logger.info("Pre-seeding module state before crew kickoff")
+        ingest_result_raw = ingest_file_tool(file_path, file_type)
+        ingest_result = json.loads(ingest_result_raw)
+        if ingest_result.get("status") != "ok":
+            logger.error(f"Ingestion failed: {ingest_result}")
+            return self._generate_insight(
+                f"[Ingestion error] {ingest_result.get('message', ingest_result_raw)}",
+                question,
+                persona,
+            )
+
+        schema_result_raw = analyze_schema_tool()
+        schema_result = json.loads(schema_result_raw)
+        if schema_result.get("status") != "ok":
+            logger.warning(f"Schema analysis issue: {schema_result.get('message')}")
+
+        # Build a plain-text schema summary to inject into task1's output so the
+        # data_analyst has column names and types as prompt context.
+        schema_summary = (
+            f"Dataset: {ingest_result.get('primary_sheet')} | "
+            f"Rows: {ingest_result.get('row_count')} | "
+            f"Columns: {', '.join(str(c) for c in schema_result.get('columns', {}).keys())}"
+        )
 
         task1 = Task(
             description=(
-                f"Use the ingest_file tool to load '{file_path}' (type: {file_type}). "
-                f"Then use analyze_schema to profile the data. "
-                f"Return a concise summary of the dataset structure."
+                f"The dataset has already been loaded and profiled. "
+                f"Here is the schema summary:\n{schema_summary}\n\n"
+                f"Review this schema and confirm the dataset is ready for analysis. "
+                f"Note any potential data quality concerns relevant to: \"{question}\""
             ),
             expected_output=(
-                "A brief description of the dataset: sheet names, row count, "
-                "column types, and any data quality warnings."
+                "A brief confirmation that the dataset is loaded, with column names, "
+                "row count, and any data quality notes relevant to the question."
             ),
             agent=self.orchestrator,
         )
 
         task2 = Task(
             description=(
-                f"Answer this question: \"{question}\"\n"
-                f"Use the execute_query tool with the question above. "
-                f"The data has already been loaded by the orchestrator in task 1."
+                f"Answer this question using the execute_query tool: \"{question}\"\n"
+                f"The dataset is already loaded in the session — do not re-load it. "
+                f"Call execute_query with only the 'question' argument."
             ),
-            expected_output="A clear, concise answer to the business question.",
+            expected_output="A clear, concise answer to the business question with the key metric or finding.",
             agent=self.data_analyst,
             context=[task1],
         )
