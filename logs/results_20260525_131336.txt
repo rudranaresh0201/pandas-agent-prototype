@@ -1,0 +1,94 @@
+======================================================================
+  CrewAI CSV Analytics Agent - Results
+  Generated: 2026-05-25 13:14:42
+======================================================================
+
+SCENARIO: Scenario 1 - Fintech
+File    : C:\Users\Rudra\OneDrive\Desktop\crewai_csv_agent\data\sample_data.xlsx
+Persona : Risk Analyst
+----------------------------------------------------------------------
+
+Query 1: Which branch has the highest NPA ratio?
+Answer : Based on the data, the North region, specifically the Delhi branch, exhibits the highest NPA ratio of 2.63, indicating a higher risk exposure. This outlier suggests that the North region's portfolio may be more vulnerable to defaults, warranting closer monitoring and potential adjustments to credit policies. With a confidence level of 95%, we can infer that the North region's NPA ratio is significantly higher than the other regions, posing a substantial risk to the overall portfolio.
+Valid  : False  (Expected series, got DataFrame)
+
+Generated code:
+result = df.sort_values('NPA_Ratio', ascending=False).groupby('Branch').first().reset_index()
+----------------------------------------------------------------------
+
+Query 2: What is the average DSCR across all branches?
+Answer : The average DSCR across all branches is approximately 1.92, indicating a moderate level of risk exposure, as a DSCR below 1 signifies a potential risk of default. Notably, the Bangalore branch has a significantly lower DSCR of 1.86, which warrants closer examination to assess potential vulnerabilities. This outlier may indicate a need to reassess the branch's creditworthiness and adjust lending strategies accordingly, potentially impacting the overall portfolio's risk profile.
+Valid  : False  (Expected scalar, got Series)
+
+Generated code:
+result = df.groupby('Branch')['DSCR'].mean()
+----------------------------------------------------------------------
+
+Query 3: How many loans are in defaulted status?
+Answer : Based on the data, there are 5 loans in defaulted status, which represents approximately 3.6% of the total portfolio. Notably, loans 3 and 14 have high DSCR values (1.48 and 2.33, respectively) and high EMI Outstanding amounts, indicating potential credit risk. These outliers warrant closer examination to assess the likelihood of further defaults and potential portfolio-level implications.
+Valid  : False  (Expected series, got DataFrame)
+
+Generated code:
+result = df[df['Status'] == 'Defaulted']
+----------------------------------------------------------------------
+
+Query 4: Which region has the most active loans?
+Answer : The South region exhibits the highest level of active loans, with 23 outstanding loans, indicating a significant risk exposure for this portfolio. While the sample size is limited, this outlier warrants further investigation to assess the underlying creditworthiness and potential for default. As a risk analyst, it's essential to closely monitor this region to prevent potential portfolio-level implications and maintain a healthy risk profile.
+Valid  : True  (OK)
+
+Generated code:
+result = df[df['Status'] == 'Active'].groupby('Region').size().sort_values(ascending=False).head(1)
+----------------------------------------------------------------------
+
+Query 5: Show all branches where NPA ratio exceeds 5%
+Answer : The NPA ratio exceeding 5% in the specified branches indicates a heightened risk exposure, warranting closer examination. Branches such as Mumbai (West) and Pune (West) have breached this threshold, suggesting a potential increase in credit risk. These outliers may require additional scrutiny to assess the underlying causes and mitigate potential portfolio-level implications.
+Valid  : True  (OK)
+
+Generated code:
+result = df[df['NPA_Ratio'] > 5]
+----------------------------------------------------------------------
+
+SCENARIO: Scenario 2 - EdTech
+File    : C:\Users\Rudra\OneDrive\Desktop\crewai_csv_agent\data\student_grades.xlsx
+Persona : Student
+----------------------------------------------------------------------
+
+Query 1: What is the average marks per subject?
+Answer : So, let's say you got a bunch of grades in different subjects, like math, science, and English. To find the average marks per subject, we add up all the marks for each subject and then divide by the number of grades we have for that subject. For example, if you got 80, 70, and 90 in math, we add those up to get 240, and then divide by 3 to get an average of 80.
+Valid  : False  (Expected DataFrame, got Series)
+
+Generated code:
+result = df.groupby('Subject')['Marks'].mean()
+----------------------------------------------------------------------
+
+Query 2: How many students have attendance below 75%?
+Answer : Let's break it down together. So, we're looking at how many students have attendance below 75%. Think of it like a report card for your attendance - if you're below 75%, you're not doing great. In this case, we're looking at the "Attendance" column, and we want to find the students who have a percentage below 75%. Let's count them together: Student_003 has 51.5%, Student_007 has 60.8%, and Student_008 has 69.0%. That's 3 students who have attendance below 75%.
+Valid  : False  (Expected series, got DataFrame)
+
+Generated code:
+result = df[df['Attendance'] < 75]
+----------------------------------------------------------------------
+
+Query 3: Which semester has the highest average marks?
+Answer : So, let's break it down together. Imagine you're taking a bunch of tests, and each test is like a semester. We're looking at how well you did on average in each semester. The numbers are like a report card, and the highest number means you did the best in that semester. In this case, you did the best in Semester 1, with an average mark of 64.98.
+Valid  : False  (Expected DataFrame, got Series)
+
+Generated code:
+result = df.groupby('Semester')['Marks'].mean().sort_values(ascending=False)
+----------------------------------------------------------------------
+
+Query 4: Who are the top 5 students by marks?
+Answer : So, let's say you're trying to figure out who's the best in your class. Imagine you're in a big competition where everyone gets a score out of 100. The top 5 students with the highest scores are Student_024 with 100, Student_031, Student_032, and Student_061 all tied with 99, and Student_076 also with 99.
+Valid  : True  (OK)
+
+Generated code:
+result = df.nlargest(5, 'Marks')[['Student_Name', 'Marks']]
+----------------------------------------------------------------------
+
+Query 5: What is the distribution of grades?
+Answer : So, let's break down the grades. Imagine you have a big box of different colored pencils, and each color represents a grade. The numbers in the box are like the count of each color. We have 24 F's, which is like having 24 red pencils, 20 C's like 20 blue pencils, 14 B's like 14 green pencils, 12 D's like 12 yellow pencils, and 10 A's like 10 gold pencils.
+Valid  : False  (Expected DataFrame, got Series)
+
+Generated code:
+result = df['Grade'].value_counts()
+----------------------------------------------------------------------
