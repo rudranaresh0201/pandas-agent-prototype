@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from core.llm_client import LLMClient
 from core.query_plan import QueryPlan
@@ -17,42 +17,13 @@ _FALLBACK_PLAN: Dict[str, Any] = {
     "suggested_code": "result = df.describe().to_string()",
 }
 
-_PROMPT_TEMPLATE = """\
-You are a pandas query planner. Given a DataFrame schema and a question, produce an execution plan.
-
-Schema:
-{schema_json}
-
-Question: {question}
-
-Respond with ONLY a valid JSON object — no markdown fences, no explanation:
-{{
-  "target_columns": ["col1", "col2"],
-  "operation": "filter|groupby|aggregate|sort|count|rank",
-  "expected_output_type": "scalar|series|dataframe|string",
-  "validation_rules": {{}},
-  "suggested_code": "result = df[...]"
-}}
-
-Rules for suggested_code:
-- DataFrame already loaded as `df`; do NOT import anything
-- Assign the final answer to `result`
-- Keep code concise and correct for pandas 2.x
-"""
-
 
 class QueryPlannerAgent:
     def __init__(self):
         self.llm = LLMClient()
 
-    def plan(self, question: str, schema_profile: SchemaProfile) -> QueryPlan:
-        schema_dict = schema_profile.to_dict() if schema_profile else {}
-        schema_json = json.dumps(schema_dict, indent=2, default=str)
-
-        prompt = _PROMPT_TEMPLATE.format(
-            schema_json=schema_json[:3000],  # truncate to avoid token overflow
-            question=question,
-        )
+    def plan(self, question: str, schema_profile: Optional[SchemaProfile]) -> QueryPlan:
+        prompt = self._build_planner_prompt(question, schema_profile)
 
         try:
             raw = self.llm.call(prompt, temperature=0, max_tokens=600)
@@ -70,6 +41,63 @@ class QueryPlannerAgent:
             validation_rules=plan_dict.get("validation_rules", {}),
             suggested_code=self._clean_code(plan_dict.get("suggested_code", "")),
         )
+
+    def _build_planner_prompt(self, question: str, schema: Optional[SchemaProfile]) -> str:
+        if schema is None:
+            return (
+                "You are a pandas query planner. DataFrame is loaded as `df`.\n"
+                f"Question: {question}\n"
+                'Return ONLY valid JSON: {{"target_columns": [], "operation": "aggregate", '
+                '"expected_output_type": "scalar", "validation_rules": {{}}, '
+                '"suggested_code": "result = df.describe().to_string()"}}'
+            )
+
+        col_catalog = []
+        for col_name, col_profile in schema.columns.items():
+            hint = f"{col_name} ({col_profile.semantic_type}"
+            vr = col_profile.value_range
+            if vr and "min" in vr and "max" in vr:
+                hint += f", range: {vr['min']} to {vr['max']}"
+            if col_profile.unique_values <= 10:
+                hint += f", values: {col_profile.sample_values[:5]}"
+            hint += ")"
+            col_catalog.append(hint)
+
+        catalog_str = "\n".join(f"  - {c}" for c in col_catalog)
+
+        return f"""You are a pandas query planner with STRICT column grounding rules.
+
+AVAILABLE COLUMNS (use ONLY these exact names):
+{catalog_str}
+
+STRICT RULES:
+1. ONLY use column names from the list above — no variations
+2. Match the user's business metric to the MOST SEMANTICALLY RELEVANT column — not just any numeric column
+3. For grouping: match the user's grouping entity to the correct categorical column
+4. If user says "VaR" → use VaR_1Day not Face_Value
+5. If user says "mark to market" → use Mark_to_Market not Trade_Price
+6. If user says "PnL" → use PnL_Daily or Mark_to_Market
+7. If user says "by portfolio type" → group by Portfolio column
+8. If user says "by desk" → group by Desk column
+9. If user says "by branch" → group by Branch column
+
+Question: {question}
+
+Return ONLY valid JSON — no markdown fences, no explanation:
+{{
+  "target_columns": ["exact_column_name"],
+  "group_by_column": "exact_column_name_or_null",
+  "operation": "mean|sum|count|max|min|filter",
+  "expected_output_type": "scalar|series|dataframe",
+  "suggested_code": "result = df...",
+  "validation_rules": {{}}
+}}
+
+VERIFY before returning:
+- Every column in target_columns exists in the AVAILABLE COLUMNS list
+- suggested_code uses only exact column names from the list
+- group_by_column matches the user's grouping intent exactly
+"""
 
     def _parse_json(self, raw: str) -> Dict[str, Any]:
         # Strip markdown fences if present

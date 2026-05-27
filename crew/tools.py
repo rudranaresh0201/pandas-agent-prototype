@@ -2,29 +2,44 @@
 CrewAI tool wrappers. Each tool is also exposed as a plain Python function
 for direct use in the pipeline (main.py auto-scenarios).
 
-Module-level _state stores the DataStore and SchemaProfile between tool calls
-so that the full DataFrame is never serialized through CrewAI's text context.
+Module-level _SESSION_DATASTORE / _SESSION_SCHEMA cache the DataStore and
+SchemaProfile between tool calls so the full DataFrame is never serialized
+through CrewAI's text context and LLM re-ingestion calls are no-ops.
 """
 import json
 import logging
-from typing import Any, Dict, Optional, Type
+from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-# Shared in-memory state across tool calls within a run
-_state: Dict[str, Any] = {"datastore": None, "schema": None, "cleaning_ops": []}
+# Session-level cache: set once on first ingest, guards against LLM re-ingestion calls
+_SESSION_DATASTORE = None
+_SESSION_SCHEMA = None
 
 
 # ── Plain Python functions (also called by BaseTool._run) ─────────────────────
 
 def ingest_file_tool(file_path: str, file_type: str) -> str:
     """Ingest a CSV/XLSX file. Stores DataStore in module state. Returns summary JSON."""
+    global _SESSION_DATASTORE, _SESSION_SCHEMA
     from agents.file_ingestion_agent import FileIngestionAgent
+
+    if _SESSION_DATASTORE is not None:
+        ds = _SESSION_DATASTORE
+        return json.dumps({
+            "status": "ok",
+            "cached": True,
+            "message": "Dataset already loaded in session",
+            "primary_sheet": ds.primary_sheet,
+            "row_count": ds.row_count,
+            "columns": list(ds.sheets[ds.primary_sheet].columns),
+        })
+
     try:
         ds = FileIngestionAgent().ingest(file_path, file_type)
-        _state["datastore"] = ds
+        _SESSION_DATASTORE = ds
         summary = {
             "status": "ok",
             "primary_sheet": ds.primary_sheet,
@@ -42,12 +57,13 @@ def ingest_file_tool(file_path: str, file_type: str) -> str:
 
 def analyze_schema_tool(datastore_json: str = "") -> str:
     """Analyze schema & clean the loaded DataStore. Returns SchemaProfile JSON."""
+    global _SESSION_DATASTORE, _SESSION_SCHEMA
     from agents.schema_analyst_agent import SchemaAnalystAgent
     from agents.data_cleaning_agent import DataCleaningAgent
     from core.datastore import DataStore
 
     try:
-        ds = _state.get("datastore")
+        ds = _SESSION_DATASTORE
         if ds is None and datastore_json:
             ds = DataStore.from_json(datastore_json)
 
@@ -61,9 +77,8 @@ def analyze_schema_tool(datastore_json: str = "") -> str:
         ds_clean, ops = cleaning_agent.clean(ds, schema)
         schema = schema_agent.analyze(ds_clean)  # re-profile after cleaning
 
-        _state["datastore"] = ds_clean
-        _state["schema"] = schema
-        _state["cleaning_ops"] = ops
+        _SESSION_DATASTORE = ds_clean
+        _SESSION_SCHEMA = schema
 
         result = schema.to_dict()
         result["cleaning_ops"] = ops
@@ -76,19 +91,20 @@ def analyze_schema_tool(datastore_json: str = "") -> str:
 
 def execute_query_tool(question: str, datastore_json: str = "") -> str:
     """Plan, execute, and validate a pandas query. Returns result JSON."""
+    global _SESSION_DATASTORE, _SESSION_SCHEMA
     from agents.query_planner_agent import QueryPlannerAgent
     from agents.pandas_execution_agent import PandasExecutionAgent
     from agents.validation_agent import ValidationAgent
     from core.datastore import DataStore
 
     try:
-        ds = _state.get("datastore")
+        ds = _SESSION_DATASTORE
         if ds is None and datastore_json:
             ds = DataStore.from_json(datastore_json)
         if ds is None:
-            return json.dumps({"status": "error", "message": "No datastore available"})
+            return json.dumps({"status": "error", "message": "No dataset loaded. Upload a file first."})
 
-        schema = _state.get("schema")
+        schema = _SESSION_SCHEMA
 
         plan = QueryPlannerAgent().plan(question, schema)
         result, code, error = PandasExecutionAgent().execute(plan, ds)

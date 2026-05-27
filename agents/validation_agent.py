@@ -22,6 +22,10 @@ class ValidationAgent:
         if not ok:
             return False, reason
 
+        ok, reason = self._check_semantic_columns(query_plan.suggested_code, query_plan)
+        if not ok:
+            return False, reason
+
         ok, reason = self._check_rules(result, rules, query_plan)
         if not ok:
             return False, reason
@@ -49,6 +53,21 @@ class ValidationAgent:
         if expected == "string":
             return True, "OK"  # anything can be stringified
 
+        return True, "OK"
+
+    def _check_semantic_columns(
+        self, code: str, plan: QueryPlan
+    ) -> Tuple[bool, str]:
+        """Verify generated code uses the planned target columns."""
+        if not plan.target_columns:
+            return True, "OK"
+
+        for col in plan.target_columns:
+            if col and col not in code:
+                return False, (
+                    f"Generated code does not use planned column "
+                    f"'{col}'. Possible semantic mismatch."
+                )
         return True, "OK"
 
     def _check_rules(
