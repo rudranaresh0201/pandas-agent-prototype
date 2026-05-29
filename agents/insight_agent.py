@@ -28,6 +28,8 @@ _PERSONA_STYLES = {
 _PROMPT = """\
 You answered a data question. Generate a 2-3 sentence explanation tailored for the specified persona.
 
+IMPORTANT: Always start your response with the actual computed number or result from Raw Answer. Never explain without stating the value first.
+
 Question: {question}
 Raw Answer: {result}
 
